@@ -753,7 +753,6 @@ export default function CreditCard() {
                       <th className="pb-2 pr-3 font-medium text-gray-600">Category</th>
                       <th className="pb-2 pr-3 font-medium text-gray-600 text-right">Amount</th>
                       <th className="pb-2 pr-3 font-medium text-gray-600">Notes</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Member</th>
                       <th className="pb-2 w-20"></th>
                     </tr>
                   </thead>
@@ -763,13 +762,15 @@ export default function CreditCard() {
                       return (
                         <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50 group">
                           <td className="py-2 pr-3 text-gray-700 whitespace-nowrap">{formatDate(p.date)}</td>
-                          <td className="py-2 pr-3 text-gray-900">{p.description}</td>
+                          <td className="py-2 pr-3 text-gray-900">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span>{p.description}</span>
+                              {p.member && <MemberTag name={p.member} />}
+                            </div>
+                          </td>
                           <td className="py-2 pr-3 text-gray-600">{p.category}</td>
                           <td className="py-2 pr-3 text-gray-900 text-right whitespace-nowrap">{formatCAD(p.amount)}</td>
                           <td className="py-2 pr-3 text-gray-500 max-w-xs truncate">{p.notes ?? ''}</td>
-                          <td className="py-2 pr-3">
-                            <MemberTag name={p.member} />
-                          </td>
                           <td className="py-2">
                             <div className="flex items-center gap-2 justify-end">
                               {/* Copy to form */}

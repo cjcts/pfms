@@ -535,7 +535,7 @@ export default function Income() {
               <tfoot>
                 <tr className="bg-gray-50 border-t-2 border-gray-200">
                   <td colSpan={2} className="px-4 py-3 text-sm font-semibold text-gray-700">Total</td>
-                  <td className={`px-4 py-3 text-sm font-semibold text-right ${actualColor}`}>
+                  <td className="px-4 py-3 text-sm font-semibold text-right text-teal-700">
                     {formatCAD(totalActual)}
                   </td>
                   <td colSpan={2} />

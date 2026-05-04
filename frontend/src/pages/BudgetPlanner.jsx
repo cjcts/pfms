@@ -256,16 +256,19 @@ export default function BudgetPlanner() {
                   <th className="text-left px-5 py-2.5 font-medium">Category</th>
                   <th className="text-right px-4 py-2.5 font-medium">Budget</th>
                   <th className="text-right px-4 py-2.5 font-medium">Spent</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Balance</th>
                   <th className="px-4 py-2.5 font-medium w-40">Progress</th>
                   <th className="text-center px-4 py-2.5 font-medium">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {activeRows.map(row => {
-                  const fillPct   = progressWidth(row.actual, row.target)
-                  const barClass  = progressBarColor(row.actual, row.target)
-                  const isOver    = row.target > 0 && row.actual > row.target
+                  const fillPct    = progressWidth(row.actual, row.target)
+                  const barClass   = progressBarColor(row.actual, row.target)
+                  const isOver     = row.target > 0 && row.actual > row.target
                   const spentClass = isOver ? 'text-red-500 font-medium' : 'text-gray-700'
+                  const balance    = row.target - row.actual
+                  const balanceClass = balance >= 0 ? 'text-green-600 tabular-nums' : 'text-red-500 font-medium tabular-nums'
 
                   // Status badge
                   let badge
@@ -297,6 +300,9 @@ export default function BudgetPlanner() {
                       </td>
                       <td className={`px-4 py-3 text-right tabular-nums ${spentClass}`}>
                         {formatCAD(row.actual)}
+                      </td>
+                      <td className={`px-4 py-3 text-right ${row.target > 0 ? balanceClass : 'text-gray-400 tabular-nums'}`}>
+                        {row.target > 0 ? formatCAD(balance) : '—'}
                       </td>
                       <td className="px-4 py-3">
                         <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">

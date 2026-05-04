@@ -6,7 +6,8 @@ import {
 } from 'recharts'
 import { TrendingUp, TrendingDown, Wallet, PiggyBank, Receipt, X } from 'lucide-react'
 
-import { formatCAD, formatDate, formatMonthLabel, currentMonthKey } from '../utils/formatters'
+import { formatCAD, formatDate, formatMonthLabel } from '../utils/formatters'
+import { useSelectedMonth } from '../utils/useSelectedMonth'
 import { CATEGORY_COLORS } from '../utils/categories'
 import { getSummary, getSummaryHistory } from '../api/summary'
 import { getExpenses } from '../api/expenses'
@@ -196,7 +197,7 @@ function DrillDownPanel({ category, selectedMonth, allExpenses, onClose }) {
 // ─── main component ──────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey())
+  const [selectedMonth, setSelectedMonth] = useSelectedMonth()
 
   // summary state
   const [summary, setSummary] = useState(null)

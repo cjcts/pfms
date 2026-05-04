@@ -8,13 +8,13 @@ const db      = require('../db/database')
 const seedData = db.transaction(() => {
   const expCats = [
     'Hypermarket','Restaurants','Fuel','Transport expenses','Hospital & medicines',
-    'Purchases','Entertainment','Joy Activities','Gifts','Trip expenses','Haircut',
-    'Subscriptions','Other Debits','Interest rates','Rec Activities','Avoidable expenses','Miscellaneous',
+    'Purchases','Entertainment','Joy Activities','Gifts','Trip expenses',
+    'Subscriptions','Other Debits','Interest rates','Avoidable expenses','Miscellaneous',
   ]
   const incCats = ['Salary','CTS','CRA','Bank Interest','Marketplace','Refunds','Other Income']
   const fixedCats = [
     'House Rental','Car loan / EMI','Insurances','Investments','Savings',
-    'Home Expenses (India)','Mobile bill payment','EB bill payment',
+    'Home Expenses (India)','Mobile bill payment',
     'Car wash & service','Transfers','Offerings','Tithe','Miscellaneous',
   ]
   const recipients = ['Transfers','Missionary']
@@ -28,6 +28,30 @@ const seedData = db.transaction(() => {
   db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('records_per_page', '3')").run()
 })
 try { seedData() } catch (err) { console.error('[admin] seedData failed (non-fatal):', err.message) }
+
+// Remove deprecated categories — hard-delete if not in use, soft-delete if in use
+;(() => {
+  try {
+    const deprecatedExp = ['Haircut', 'Rec Activities']
+    for (const name of deprecatedExp) {
+      const inUse = db.prepare('SELECT COUNT(*) as c FROM expenses WHERE category=?').get(name).c > 0
+      if (inUse) {
+        db.prepare('UPDATE expense_categories SET is_active=0 WHERE name=?').run(name)
+      } else {
+        db.prepare('DELETE FROM expense_categories WHERE name=?').run(name)
+      }
+    }
+    const deprecatedFixed = ['EB bill payment']
+    for (const name of deprecatedFixed) {
+      const inUse = db.prepare('SELECT COUNT(*) as c FROM predictable_expenses WHERE category=?').get(name).c > 0
+      if (inUse) {
+        db.prepare('UPDATE fixed_expense_categories SET is_active=0 WHERE name=?').run(name)
+      } else {
+        db.prepare('DELETE FROM fixed_expense_categories WHERE name=?').run(name)
+      }
+    }
+  } catch (err) { console.error('[admin] deprecation cleanup failed (non-fatal):', err.message) }
+})()
 
 const TABLE_MAP = {
   expense:   'expense_categories',

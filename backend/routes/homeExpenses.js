@@ -71,6 +71,28 @@ router.post('/', (req, res) => {
   }
 })
 
+// PUT /:id — update date, recipient, amount_cad, notes
+router.put('/:id', (req, res) => {
+  const { id } = req.params
+  try {
+    const record = db.prepare('SELECT id FROM home_expenses WHERE id=?').get(id)
+    if (!record) return res.status(404).json({ success: false, error: 'Record not found' })
+    const { date, recipient, amount_cad, notes } = req.body
+    const fields = []
+    const vals = []
+    if (date      !== undefined) { fields.push('date=?');       vals.push(date) }
+    if (recipient !== undefined) { fields.push('recipient=?');  vals.push(recipient) }
+    if (amount_cad !== undefined) { fields.push('amount_cad=?'); vals.push(amount_cad) }
+    if (notes     !== undefined) { fields.push('notes=?');      vals.push(notes) }
+    if (fields.length === 0) return res.status(400).json({ success: false, error: 'No fields to update' })
+    vals.push(id)
+    db.prepare(`UPDATE home_expenses SET ${fields.join(', ')} WHERE id=?`).run(...vals)
+    return res.json({ success: true })
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
+
 // DELETE /:id
 router.delete('/:id', (req, res) => {
   const { id } = req.params

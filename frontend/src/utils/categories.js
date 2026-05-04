@@ -1,10 +1,10 @@
 export const EXPENSE_CATEGORIES = [
   'Hypermarket', 'Restaurants', 'Fuel', 'Transport expenses',
   'Hospital & medicines', 'Purchases', 'Entertainment', 'Joy Activities',
-  'Gifts', 'Trip expenses', 'Haircut', 'Subscriptions', 'Other Debits',
-  'Interest rates', 'Rec Activities', 'Avoidable expenses', 'Miscellaneous',
+  'Gifts', 'Trip expenses', 'Subscriptions', 'Other Debits',
+  'Interest rates', 'Avoidable expenses', 'Miscellaneous',
   'House Rental', 'Insurances', 'Home Expenses (India)', 'Offerings',
-  'Tithe', 'Investments', 'Savings', 'EB bill payment',
+  'Tithe', 'Investments', 'Savings',
   'Car loan / EMI', 'Car wash & service', 'Transfers', 'Mobile bill payment',
 ]
 

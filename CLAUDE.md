@@ -41,7 +41,7 @@ No linter is configured.
 Run from the `pfms/` root (where `playwright.config.js` lives):
 
 ```bash
-npm test              # all 122 tests (API + UI)
+npm test              # all tests (API + UI)
 npm run test:api      # API tests only — no browser, fast
 npm run test:ui       # UI tests only — headless Chromium
 npm run test:headed   # UI tests in a visible browser window (debug)
@@ -54,6 +54,8 @@ First-time setup (only needed once):
 npm install
 npx playwright install chromium
 ```
+
+> **Note:** E2E tests have not been updated to cover the latest UI overhaul (inline editing, copy-from-prev panels, Admin page, Reminders widget, day-only date inputs). They will need updating before they are fully passing again.
 
 ---
 
@@ -77,7 +79,7 @@ pfms/
 ├── backend/
 │   ├── server.js          ← Express entry point; mounts all route files
 │   ├── db/
-│   │   ├── database.js    ← better-sqlite3 singleton; auto-applies schema on require
+│   │   ├── database.js    ← better-sqlite3 singleton; auto-applies schema + idempotent column migrations on require
 │   │   ├── schema.sql     ← full schema with IF NOT EXISTS guards
 │   │   └── migrations/    ← manual numbered migration files for schema changes
 │   └── routes/            ← one file per domain, mounted in server.js
@@ -85,10 +87,11 @@ pfms/
 │   └── src/
 │       ├── pages/         ← one file per screen, matched to a route in App.jsx
 │       ├── api/           ← all fetch() calls; each page has a matching api module
-│       ├── components/    ← shared UI: Layout.jsx (sidebar + Outlet), etc.
+│       ├── components/    ← shared UI: Layout.jsx (sidebar), ConfirmModal.jsx, EmptyState.jsx
 │       └── utils/
-│           ├── formatters.js   ← formatCAD, formatDate, formatMonthLabel, currentMonthKey
-│           └── categories.js  ← EXPENSE_CATEGORIES (32 values), CATEGORY_COLORS
+│           ├── formatters.js      ← formatCAD, formatDate, formatMonthLabel, currentMonthKey, parseDay
+│           ├── useSelectedMonth.js ← custom hook; persists selected month in localStorage
+│           └── categories.js      ← EXPENSE_CATEGORIES, CATEGORY_COLORS
 └── docs/
 ```
 
@@ -103,24 +106,28 @@ pfms/
 
 ### Database singleton
 
-`database.js` opens (or creates) `finance.db`, sets `journal_mode = WAL` + `foreign_keys = ON`, and runs `schema.sql` with `IF NOT EXISTS` guards — schema self-applies on fresh installs. For post-install schema changes, add a numbered file under `migrations/` and run it once manually.
+`database.js` opens (or creates) `finance.db`, sets `journal_mode = WAL` + `foreign_keys = ON`, runs `schema.sql` (with `IF NOT EXISTS` guards), and then applies a list of idempotent `ALTER TABLE … ADD COLUMN` statements inside a try/catch loop — safe to run on every restart. Post-install schema changes go in that list; one-off manual migrations go under `migrations/`.
 
 ### Routes currently registered
 
-| File | Mounted at | Built endpoints |
-|------|-----------|-----------------|
-| `routes/expenses.js` | `/api/expenses` | GET `/`, POST `/`, PUT `/:id`, DELETE `/:id`, GET `/descriptions` |
-| `routes/income.js` | `/api/income` | GET `/` (auto-seeds), PUT `/:id` |
+| File | Mounted at | Endpoints |
+|------|-----------|-----------|
+| `routes/expenses.js` | `/api/expenses` | GET `/descriptions`, GET `/`, POST `/`, PUT `/:id`, DELETE `/:id` |
+| `routes/income.js` | `/api/income` | GET `/` (auto-seeds OB), POST `/`, PUT `/:id`, DELETE `/:id`, POST `/copy-from-prev` |
 | `routes/summary.js` | `/api/summary` | GET `/`, GET `/history` |
-| `routes/predictable.js` | `/api/predictable` | GET `/` (auto-seeds), PUT `/:id` |
-| `routes/creditCard.js` | `/api/credit-card` | GET/POST/PUT `/:id`/DELETE `/:id` purchases; GET/POST/DELETE `/:id` payments |
-| `routes/owedOwing.js` | `/api/owed-owing` | GET `/`, POST `/`, PUT `/:id`, DELETE `/:id`, PUT `/:id/settle` |
-| `routes/homeExpenses.js` | `/api/home-expenses` | GET `/`, POST `/`, PUT `/:id`, DELETE `/:id` |
+| `routes/predictable.js` | `/api/predictable` | GET `/`, POST `/`, PUT `/:id`, DELETE `/:id`, POST `/copy-from-prev` |
+| `routes/creditCard.js` | `/api/credit-card` | GET `/`, GET `/descriptions`, POST `/purchases`, PUT `/purchases/:id`, DELETE `/purchases/:id`, POST `/payments`, PUT `/payments/:id`, DELETE `/payments/:id` |
+| `routes/owedOwing.js` | `/api/owed-owing` | GET `/`, POST `/`, PUT `/:id`, PUT `/:id/settle`, DELETE `/:id` |
+| `routes/homeExpenses.js` | `/api/home-expenses` | GET `/`, POST `/`, PUT `/:id`, DELETE `/:id`, POST `/copy-from-prev` |
 | `routes/budget.js` | `/api/budget` | GET `/`, PUT `/` (upsert by month+category) |
+| `routes/admin.js` | `/api/admin` | CRUD `/categories/:type`, GET/PUT `/settings`, GET/DELETE `/clean-data` |
+| `routes/reminders.js` | `/api/reminders` | GET `/`, POST `/`, PUT `/:id`, DELETE `/:id` |
 
-### Income / month auto-seeding
+**Important:** Routes that have both `POST /copy-from-prev` and `POST /` (income, predictable, homeExpenses) must register `/copy-from-prev` **before** `/:id` so Express doesn't match the literal string as an id.
 
-`GET /api/income?month=YYYY-MM` inserts one row per source from `DEFAULT_SOURCES` with `expected=0, actual=0` the first time that month is accessed. Follow this pattern for any table that needs default rows per month.
+### Income auto-seeding
+
+`GET /api/income?month=YYYY-MM` checks whether any rows exist for that month. If not, it inserts a single **Opening Balance** row whose value = prior month's closing balance (prior OB + income − expenses − fixed − CC). No other sources are auto-seeded — the user adds them manually.
 
 ### Delete policy (must be in every DELETE route)
 
@@ -131,7 +138,7 @@ const cutoff = new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString().
 // reject if record.month_key < cutoff
 ```
 
-The frontend mirrors this: delete button is visually disabled with tooltip "Cannot delete records older than 3 months" for out-of-window records. Do not add `deleted_at` — hard deletes are the only kind allowed.
+The frontend mirrors this: delete button is visually disabled with tooltip "Cannot delete records older than 3 months" for out-of-window records. Hard deletes only — no `deleted_at` soft-delete pattern.
 
 ### Response envelope
 
@@ -140,6 +147,17 @@ All routes return `{ success: true, data: … }` or `{ success: false, error: "�
 ### Column selection
 
 Never `SELECT *` in queries that return data to the client. Name columns explicitly.
+
+### Admin category management
+
+`routes/admin.js` seeds four lookup tables on startup (INSERT OR IGNORE): `expense_categories`, `income_categories`, `fixed_expense_categories`, `home_recipients`. It also runs a deprecation cleanup block that removes (or soft-deactivates if in use) categories that have been retired.
+
+Type → table mapping used by `/api/admin/categories/:type`:
+- `expense` → `expense_categories`
+- `income` → `income_categories`
+- `fixed` → `fixed_expense_categories`
+- `recipient` → `home_recipients`
+- `member` → `household_members`
 
 ---
 
@@ -157,33 +175,61 @@ All pages are fully implemented and wired in `App.jsx`:
 | `/income` | `pages/Income.jsx` |
 | `/owed-owing` | `pages/OwedOwing.jsx` |
 | `/home` | `pages/HomeExpenses.jsx` |
-| `/history` | `pages/History.jsx` |
+| `/history` | `pages/History.jsx` (labelled "Trends" in nav) |
 | `/budget` | `pages/BudgetPlanner.jsx` |
-| `/predictable` | `pages/Predictable.jsx` |
+| `/predictable` | `pages/PredictableExpenses.jsx` |
+| `/admin` | `pages/Admin.jsx` |
 
 ### API module pattern
 
-Each page in `src/pages/` has a matching module in `src/api/` that owns all `fetch` calls for that domain. Pages never call `fetch` directly. API modules throw `Error(json.error)` on `success: false` so callers can `.catch(err => ...)`.
+Each page in `src/pages/` has a matching module in `src/api/` that owns all `fetch` calls for that domain. Pages never call `fetch` directly. `fetchJson` (in `src/api/fetchJson.js`) handles JSON parsing, non-JSON error detection (e.g. backend down), and throws `Error(json.error)` on `success: false` so callers can `.catch(err => …)`.
 
-### Date handling pattern
+### Month selection pattern
 
-Date fields are plain `<input type="text">` — never `type="date"`. The user types `DD/MM/YYYY`. `parseDateText(text, monthKey)` in `ExpenseEntry.jsx` validates the format, checks the date is real, and confirms it falls within the selected month before returning `YYYY-MM-DD` for storage. Converting a stored ISO date back into the text field uses `isoToDDMMYYYY()`. Display uses `formatDate()` from `formatters.js`.
+All pages with a month picker use the `useSelectedMonth()` hook from `src/utils/useSelectedMonth.js`. This is a drop-in replacement for `useState(currentMonthKey())` that additionally persists the value in `localStorage` under the key `pfms_selected_month`. Navigating between pages preserves the selected month. **Never use `useState(currentMonthKey())` directly in a page** — use this hook instead.
+
+### Date input pattern
+
+Date fields use `<input type="number" min="1" max="31" placeholder="Day (1-31)">` — the user enters the day number only. `parseDay(dayStr, monthKey)` in `formatters.js` converts `"14"` + `"2026-04"` → `"2026-04-14"`, validating that the date is real (rejects e.g. April 31). Display of stored ISO dates uses `formatDate()`.
+
+> The old DD/MM/YYYY text-input pattern is no longer used anywhere. `parseDateText` / `isoToDDMMYYYY` only exist in ExpenseEntry legacy code and should be considered deprecated.
 
 ### Form validation pattern
 
 All forms use `noValidate` on `<form>` — no HTML5 built-in validation. Amount uses `/^\d+(\.\d{1,2})?$/`. Errors live in a `{ fieldName: 'message' }` state object, rendered inline below the failing field with `border-red-400 bg-red-50` on the input. Errors clear per-field on `onChange` and re-validate on submit.
 
-### Autocomplete pattern (descriptions)
+### Confirm modal pattern
 
-`GET /api/expenses/descriptions` returns unique descriptions ordered by frequency. The ExpenseEntry page fetches this on mount, filters client-side as the user types, and renders an absolutely-positioned `<ul>` dropdown. Keyboard: ↑/↓ navigate, Enter selects, Escape closes, `mousedown` outside dismisses.
+`<ConfirmModal>` in `src/components/ConfirmModal.jsx` replaces all `window.confirm()` calls. Props: `{ isOpen, title, message, confirmLabel='Delete', onConfirm, onCancel }`. Renders a centered overlay with a Cancel (outline) and Confirm (`bg-red-600`) button.
+
+### Autocomplete pattern
+
+Two pages use description autocomplete:
+- **ExpenseEntry**: `GET /api/expenses/descriptions` — unique descriptions ordered by frequency
+- **CreditCard**: `GET /api/credit-card/descriptions` — unique CC purchase descriptions ordered by frequency
+
+Both: fetch on mount, filter client-side as the user types, render an absolutely-positioned `<ul>`. Keyboard: ↑/↓ navigate, Enter selects, Escape closes, `mousedown` outside dismisses.
+
+### Copy-from-previous-month pattern
+
+Income, Fixed Expenses, and Home Expenses have a collapsible "Import from [prev month]" panel:
+- Opens a searchable checklist of prior-month rows
+- Select all / deselect by default (all pre-selected)
+- POST `/copy-from-prev` with `{ month, ids: number[] }` to import only the selected rows
+- Refreshes the table on success
+
+Credit Card has a "Pull from [prev month]" panel that populates the add form one entry at a time via copy-to-form.
 
 ### Copy-to-form pattern
 
-Each expense row has a copy icon (`Copy` from lucide-react). Clicking it populates the form state from that row (converting stored ISO date → `DD/MM/YYYY`) and scrolls the form into view via `formRef.current?.scrollIntoView(…)`.
+Expense, Credit Card, and Home Expenses rows have a copy icon. Clicking it populates the add/edit form from that row and scrolls the form into view via `formRef.current?.scrollIntoView(…)`.
 
-### Batch entry
+### Inline cell editing pattern
 
-After a successful add, the form resets to `emptyForm()` but preserves `expense_type` (and optionally `date`) so the user can immediately add the next expense without any extra clicks.
+Income, Fixed Expenses, and Home Expenses support click-to-edit on individual cells (date, amount, notes, source/category):
+- Clicking a cell shows a focused `<input>` or `<select>`
+- Enter / blur commits; Escape cancels
+- A "Save" button appears when any cell in a row is dirty (Home Expenses uses a per-row `dirty` flag)
 
 ### Design tokens
 
@@ -196,83 +242,59 @@ Text primary `gray-900` · Text secondary `gray-500`
 ## Database schema
 
 ```sql
-CREATE TABLE expenses (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  date         TEXT NOT NULL,        -- YYYY-MM-DD
-  description  TEXT NOT NULL,
-  category     TEXT NOT NULL,        -- must match EXPENSE_CATEGORIES
-  amount       REAL NOT NULL,
-  expense_type TEXT NOT NULL DEFAULT 'daily',  -- 'daily' | 'unpredictable'
-  notes        TEXT,
-  month_key    TEXT NOT NULL,        -- YYYY-MM
-  created_at   TEXT DEFAULT (datetime('now')),
-  updated_at   TEXT DEFAULT (datetime('now'))
-);
+-- Core tables (abbreviated; see schema.sql for full CREATE statements)
+expenses              (id, date, description, category, amount, expense_type DEFAULT 'daily', notes, month_key, member, created_at, updated_at)
+predictable_expenses  (id, month_key, category, actual, notes, date, updated_at)
+income                (id, month_key, source, actual, notes, date)
+credit_card_purchases (id, date, description, category, amount, my_share, notes, month_key, member)
+credit_card_payments  (id, date, amount, notes, month_key)
+owed_owing            (id, direction, person, reason, amount, is_settled, date_added, date_given, settled_date, notes)
+home_expenses         (id, date, recipient, amount_cad, amount_inr, notes, month_key)
+budget_targets        (id, month_key, category, target, UNIQUE(month_key, category))
 
-CREATE TABLE predictable_expenses (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, month_key TEXT NOT NULL,
-  category TEXT NOT NULL, budget REAL DEFAULT 0, actual REAL DEFAULT 0,
-  notes TEXT, updated_at TEXT DEFAULT (datetime('now'))
-);
+-- Admin-managed lookup tables
+expense_categories        (id, name UNIQUE, sort_order, is_active)
+income_categories         (id, name UNIQUE, sort_order, is_active)
+fixed_expense_categories  (id, name UNIQUE, sort_order, is_active)
+home_recipients           (id, name UNIQUE, sort_order, is_active)
+household_members         (id, name UNIQUE, sort_order, is_active)
 
-CREATE TABLE income (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, month_key TEXT NOT NULL,
-  source TEXT NOT NULL, expected REAL DEFAULT 0, actual REAL DEFAULT 0, notes TEXT
-);
+-- App-wide settings
+app_settings  (key PRIMARY KEY, value)
 
-CREATE TABLE credit_card_purchases (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL,
-  description TEXT NOT NULL, category TEXT NOT NULL, amount REAL NOT NULL,
-  my_share REAL, notes TEXT, month_key TEXT NOT NULL
-);
-
-CREATE TABLE credit_card_payments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL,
-  amount REAL NOT NULL, notes TEXT, month_key TEXT NOT NULL
-);
-
-CREATE TABLE owed_owing (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, direction TEXT NOT NULL,  -- 'to_give' | 'to_get'
-  person TEXT NOT NULL, reason TEXT, amount REAL NOT NULL, due_date TEXT,
-  is_settled INTEGER DEFAULT 0, date_added TEXT NOT NULL, settled_date TEXT, notes TEXT
-);
-
-CREATE TABLE home_expenses (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL,
-  recipient TEXT NOT NULL, amount_cad REAL NOT NULL, amount_inr REAL,
-  notes TEXT, month_key TEXT NOT NULL
-);
-
-CREATE TABLE budget_targets (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, month_key TEXT NOT NULL,
-  category TEXT NOT NULL, target REAL NOT NULL,
-  UNIQUE(month_key, category)
-);
-
--- Indexes
-CREATE INDEX idx_expenses_month    ON expenses(month_key);
-CREATE INDEX idx_expenses_category ON expenses(category);
-CREATE INDEX idx_cc_month          ON credit_card_purchases(month_key);
-CREATE INDEX idx_income_month      ON income(month_key);
+-- Reminders
+reminders  (id, title, due_date, type DEFAULT 'custom', notes, is_active, created_at)
 ```
+
+**Columns added via idempotent startup migrations** (in `database.js`, not schema.sql):
+- `income.date`, `predictable_expenses.date`, `owed_owing.date_given`
+- `expenses.member`, `credit_card_purchases.member`
+- `expenses.updated_at`, `predictable_expenses.updated_at`
 
 ---
 
 ## Category taxonomy
 
-`EXPENSE_CATEGORIES` in `src/utils/categories.js` is the **single source of truth**. Never add category strings anywhere else. Do not create new categories without updating this list and asking first.
+Categories are managed via the Admin page (`/admin`) and stored in DB lookup tables. `EXPENSE_CATEGORIES` in `src/utils/categories.js` is used as the default list for the **Credit Card** category dropdown (since CC purchases cross both expense and fixed categories). Do not add category strings in ad-hoc places — update the Admin page or the DB seed in `routes/admin.js` instead.
 
 ```
-Daily/variable: Hypermarket, Restaurants, Fuel, Transport expenses, Hospital & medicines,
-  Purchases, Entertainment, Joy Activities, Gifts, Trip expenses, Haircut, Subscriptions,
-  Other Debits, Interest rates, Rec Activities, Avoidable expenses, Miscellaneous
+Daily/variable expense categories:
+  Hypermarket, Restaurants, Fuel, Transport expenses, Hospital & medicines,
+  Purchases, Entertainment, Joy Activities, Gifts, Trip expenses,
+  Subscriptions, Other Debits, Interest rates, Avoidable expenses, Miscellaneous
 
-Predictable/fixed: House Rental, Insurances, Home Expenses (India), Offerings, Tithe,
-  Investments, Savings, EB bill payment, Car loan / EMI, Car wash & service,
-  Transfers, Mobile bill payment
+Fixed/predictable expense categories:
+  House Rental, Insurances, Home Expenses (India), Offerings, Tithe,
+  Investments, Savings, Car loan / EMI, Car wash & service,
+  Transfers, Mobile bill payment, Miscellaneous
+
+Home expense categories (home_recipients table):
+  Transfers, Missionary  (and any user-added entries via Admin)
+
+Income sources (income_categories table):
+  Salary, CTS, CRA, Bank Interest, Marketplace, Refunds, Other Income
+  (Opening Balance is auto-seeded per month; not in income_categories)
 ```
-
-Income sources (`INCOME_SOURCES`): Opening Balance, Salary, CTS, CRA, Bank Interest, Marketplace, Refunds, Other Income.
 
 ---
 
@@ -280,8 +302,8 @@ Income sources (`INCOME_SOURCES`): Opening Balance, Salary, CTS, CRA, Bank Inter
 
 - **Month isolation** — every query touching time-series data must filter by `month_key`. Never return all rows without a filter.
 - **Notes** — never drop or truncate `notes` fields. The user stores important context there.
-- **Opening balance** — each month's opening balance = prior month's closing balance. The income table carries an `Opening Balance` row seeded when a new month is first accessed.
-- **No localStorage for financial data** — all state goes to SQLite via the API.
+- **Opening balance** — each month's opening balance = prior month's closing balance. The income table carries an `Opening Balance` row seeded when a new month is first accessed. This row cannot be deleted.
+- **No localStorage for financial data** — SQLite is the source of truth for all money data. `localStorage` is used only for UI state (currently: `pfms_selected_month`).
 - **No cloud services, no auth** — intentionally single-user and local.
 
 ---
@@ -296,17 +318,10 @@ Income sources (`INCOME_SOURCES`): Opening Balance, Salary, CTS, CRA, Bank Inter
 | `backend/start-test.js` | Sets `DB_PATH=test.db` and `PORT=3099`, then requires `server.js` |
 | `frontend/vite.test.config.js` | Vite config for tests — proxies `/api` → `localhost:3099`, runs on port 5174 |
 | `tests/global-setup.js` | Deletes stale `test.db` before the first test run |
-| `tests/fixtures/db-reset.js` | Truncates all 8 tables via direct `better-sqlite3` connection (bypasses HTTP) |
+| `tests/fixtures/db-reset.js` | Truncates all tables via direct `better-sqlite3` connection (bypasses HTTP) |
 | `tests/fixtures/seed.js` | Inserts representative rows via API for UI tests that need pre-existing data |
 
 Test servers run on separate ports from dev servers (backend 3099 vs 3001, frontend 5174 vs 5173) so tests never touch `finance.db`.
-
-The `DB_PATH` env var in `backend/db/database.js` controls which SQLite file is opened:
-```js
-const DB_PATH = process.env.DB_PATH
-  ? path.resolve(process.env.DB_PATH)
-  : path.join(__dirname, '..', 'finance.db')
-```
 
 ### Test layout
 
@@ -316,41 +331,30 @@ tests/
     db-reset.js     ← resetTestDb() — call with await in every beforeAll
     seed.js         ← seedExpenses(), seedCCPurchase(), monthKey()
   global-setup.js
-  api/              ← 8 spec files, one per domain (request context only, no browser)
-  ui/               ← 9 spec files, one per page (Chromium, uses page fixture)
+  api/              ← spec files, one per domain (request context only, no browser)
+  ui/               ← spec files, one per page (Chromium, uses page fixture)
 ```
 
 ### Critical patterns
 
-**Always `await` resetTestDb()** — it returns a Promise. Omitting `await` in an `async beforeAll` causes a race condition where tests start before truncation finishes:
+**Always `await` resetTestDb()** — it returns a Promise:
 ```js
 // Correct
 test.beforeAll(async () => { await resetTestDb() })
-// Wrong — fires and forgets
-test.beforeAll(async () => { resetTestDb() })
 ```
 
-**`.first()` goes on the locator, not on `expect()`** — Playwright strict mode throws if a locator matches more than one element. Many text strings appear in both the sidebar nav and the page heading:
+**`.first()` goes on the locator, not on `expect()`** — many strings appear in both the sidebar nav and the page heading:
 ```js
-// Correct
 await expect(page.getByText('Dashboard').first()).toBeVisible()
-await expect(page.getByText(/Month/i).or(page.getByText(/Income/i)).first()).toBeVisible()
-// Wrong — .first() does not exist on the expect wrapper
-await expect(page.getByText('Dashboard')).first().toBeVisible()
 ```
 
-**Use dynamic month keys in API tests** — hardcoded dates like `'2025-04'` fall outside the 3-month delete window and make DELETE tests return 403. Always derive dates from `new Date()`.
+**Use dynamic month keys in API tests** — hardcoded dates fall outside the 3-month delete window. Always derive from `new Date()`.
 
-**SQLite string literals use single quotes** — `datetime("now")` silently fails (treats `"now"` as a column identifier). Use `datetime('now')`.
+**SQLite string literals use single quotes** — `datetime("now")` silently fails. Use `datetime('now')`.
 
-**BudgetPlanner category list** — categories with `target=0 AND actual=0` render in a collapsed "Untracked Categories" accordion (closed by default). Tests that assert category names must click the toggle button first:
+**BudgetPlanner category list** — categories with `target=0 AND actual=0` render in a collapsed "Untracked Categories" accordion (closed by default). Tests must click the toggle button first:
 ```js
 await page.getByRole('button', { name: /Untracked Categories/i }).click()
 ```
 
-**OwedOwing form** — the add form is hidden by default (`showForm = false`). Click "Add Entry" before filling fields. Direction is a pair of `type="button"` toggle buttons (not a `<select>`). Submit is `button[type="submit"]`.
-
-### What is not built yet
-
-- Categories/Types management screen (future requirement)
-- Excel data migration (see `docs/DATA_MIGRATION.md`)
+**OwedOwing form** — the add form is hidden by default. Click "Add Entry" before filling fields. Direction is a pair of `type="button"` toggle buttons (not a `<select>`).

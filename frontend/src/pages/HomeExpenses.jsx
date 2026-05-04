@@ -105,7 +105,7 @@ function HomeExpenseRow({ entry, selectedMonth, recipients, cutoff, onSaved, onD
             </span>
         }
       </td>
-      {/* Recipient */}
+      {/* Category */}
       <td className="px-6 py-3 font-medium text-gray-900">
         {editing === 'recipient'
           ? recipients.length > 0
@@ -247,7 +247,7 @@ export default function HomeExpenses() {
     }
 
     if (!form.recipient.trim()) {
-      errors.recipient = 'Recipient is required'
+      errors.recipient = 'Category is required'
     }
 
     if (!form.amount_cad.trim()) {
@@ -493,7 +493,7 @@ export default function HomeExpenses() {
               <>
                 <input
                   type="text"
-                  placeholder="Search recipient or notes…"
+                  placeholder="Search category or notes…"
                   value={importSearch}
                   onChange={e => setImportSearch(e.target.value)}
                   className="w-full mb-3 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
@@ -575,16 +575,16 @@ export default function HomeExpenses() {
               )}
             </div>
 
-            {/* Recipient */}
+            {/* Category */}
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-700">Recipient</label>
+              <label className="mb-1 block text-xs font-medium text-gray-700">Category</label>
               {recipients.length > 0 ? (
                 <select
                   className={inputClass('recipient')}
                   value={form.recipient}
                   onChange={e => handleFormChange('recipient', e.target.value)}
                 >
-                  <option value="">Select recipient</option>
+                  <option value="">Select category</option>
                   {recipients.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
               ) : (
@@ -672,7 +672,7 @@ export default function HomeExpenses() {
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                   <th className="px-6 py-3">Date</th>
-                  <th className="px-6 py-3">Recipient</th>
+                  <th className="px-6 py-3">Category</th>
                   <th className="px-6 py-3 text-right">Amount (CAD)</th>
                   <th className="px-6 py-3 text-right">Amount (INR)</th>
                   <th className="px-6 py-3">Notes</th>
