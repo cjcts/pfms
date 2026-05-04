@@ -6,7 +6,7 @@ const TABS = [
   { key: 'expense', label: 'Expense Categories' },
   { key: 'income', label: 'Income Categories' },
   { key: 'fixed', label: 'Fixed Categories' },
-  { key: 'recipients', label: 'Recipients' },
+  { key: 'recipients', label: 'Home Categories' },
   { key: 'member', label: 'Members' },
   { key: 'settings', label: 'Settings' },
   { key: 'clean', label: 'Clean Data' },
@@ -382,7 +382,7 @@ export default function Admin() {
         )}
         {activeTab === 'recipients' && (
           <>
-            <h2 className="text-base font-semibold text-gray-900 mb-4">Recipients</h2>
+            <h2 className="text-base font-semibold text-gray-900 mb-4">Home Categories</h2>
             <CategoryTab type="recipient" />
           </>
         )}

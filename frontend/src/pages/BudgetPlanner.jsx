@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { BarChart2, TrendingUp, TrendingDown, AlertCircle, ChevronDown, ChevronUp, Plus } from 'lucide-react'
 import { getBudget, upsertBudget } from '../api/budget'
-import { formatCAD, formatMonthLabel, currentMonthKey } from '../utils/formatters'
+import { formatCAD, formatMonthLabel } from '../utils/formatters'
+import { useSelectedMonth } from '../utils/useSelectedMonth'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -108,7 +109,7 @@ function EditableTarget({ row, selectedMonth, onSaved, focusRef }) {
 // ── BudgetPlanner ────────────────────────────────────────────────────────────
 
 export default function BudgetPlanner() {
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey())
+  const [selectedMonth, setSelectedMonth] = useSelectedMonth()
   const [rows, setRows]                   = useState([])
   const [loading, setLoading]             = useState(true)
   const [error, setError]                 = useState(null)

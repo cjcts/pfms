@@ -3,7 +3,8 @@ import { Trash2, PlusCircle, Copy, AlertCircle, Pencil, ChevronDown, Search } fr
 import { getExpenses, createExpense, updateExpense, deleteExpense } from '../api/expenses'
 import { getSettings } from '../api/admin'
 import { EXPENSE_CATEGORIES } from '../utils/categories'
-import { formatCAD, formatDate, formatMonthLabel, currentMonthKey, parseDay } from '../utils/formatters'
+import { formatCAD, formatDate, formatMonthLabel, parseDay } from '../utils/formatters'
+import { useSelectedMonth } from '../utils/useSelectedMonth'
 import ConfirmModal from '../components/ConfirmModal'
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ function MemberTag({ name }) {
 // ── component ──────────────────────────────────────────────────────────────
 
 export default function ExpenseEntry() {
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey())
+  const [selectedMonth, setSelectedMonth] = useSelectedMonth()
   const [expenses, setExpenses]           = useState([])
   const [loading, setLoading]             = useState(true)
   const [form, setForm]                   = useState(emptyForm)

@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Trash2, Pencil, CreditCard as CreditCardIcon, ShoppingBag, Wallet, ChevronDown, Search, Copy } from 'lucide-react'
 import EmptyState from '../components/EmptyState'
 import ConfirmModal from '../components/ConfirmModal'
-import { getCreditCard, createPurchase, updatePurchase, deletePurchase, createPayment, updatePayment, deletePayment } from '../api/creditCard'
+import { getCreditCard, createPurchase, updatePurchase, deletePurchase, createPayment, updatePayment, deletePayment, getDescriptions } from '../api/creditCard'
 import { getSettings } from '../api/admin'
-import { formatCAD, formatDate, formatMonthLabel, currentMonthKey, parseDay } from '../utils/formatters'
+import { formatCAD, formatDate, formatMonthLabel, parseDay } from '../utils/formatters'
+import { useSelectedMonth } from '../utils/useSelectedMonth'
 import { EXPENSE_CATEGORIES } from '../utils/categories'
 
 // ── Delete policy ─────────────────────────────────────────────────────────────
@@ -57,6 +58,38 @@ function PurchaseForm({ monthKey, onDone, formRef, editingPurchase, onCancelEdit
   const [submitting, setSubmitting] = useState(false)
   const [flash, setFlash] = useState('')
 
+  // Description autocomplete state
+  const [allDescs, setAllDescs] = useState([])
+  const [suggestions, setSuggestions] = useState([])
+  const [descOpen, setDescOpen] = useState(false)
+  const [descIdx, setDescIdx] = useState(-1)
+  const descBoxRef = useRef(null)
+  const descInputRef = useRef(null)
+
+  // Fetch descriptions once on mount
+  useEffect(() => {
+    getDescriptions().then(setAllDescs).catch(() => {})
+  }, [])
+
+  // Filter suggestions whenever description field changes
+  useEffect(() => {
+    const q = fields.description.trim().toLowerCase()
+    if (!q) { setSuggestions([]); setDescOpen(false); return }
+    const filtered = allDescs.filter(d => d.toLowerCase().includes(q)).slice(0, 8)
+    setSuggestions(filtered)
+    setDescOpen(filtered.length > 0)
+    setDescIdx(-1)
+  }, [fields.description, allDescs])
+
+  // Close autocomplete on outside click
+  useEffect(() => {
+    function handleMouseDown(e) {
+      if (descBoxRef.current && !descBoxRef.current.contains(e.target)) setDescOpen(false)
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [])
+
   // Populate form when editing or copying from prev month
   useEffect(() => {
     if (editingPurchase) {
@@ -69,6 +102,11 @@ function PurchaseForm({ monthKey, onDone, formRef, editingPurchase, onCancelEdit
         member: editingPurchase.member ?? '',
       })
       setErrors({})
+      setDescOpen(false)
+      // Focus description when copying from previous month
+      if (editingPurchase._copyMode) {
+        setTimeout(() => descInputRef.current?.focus(), 50)
+      }
     } else {
       setFields(makeEmpty())
       setErrors({})
@@ -144,16 +182,38 @@ function PurchaseForm({ monthKey, onDone, formRef, editingPurchase, onCancelEdit
         {errors.day && <p className="mt-1 text-xs text-red-600">{errors.day}</p>}
       </div>
 
-      {/* Description */}
-      <div className="sm:col-span-2 lg:col-span-1">
+      {/* Description with autocomplete */}
+      <div className="sm:col-span-2 lg:col-span-1 relative" ref={descBoxRef}>
         <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
         <input
+          ref={descInputRef}
           type="text"
           placeholder="e.g. Amazon order"
           value={fields.description}
           onChange={e => set('description', e.target.value)}
+          onKeyDown={e => {
+            if (!descOpen) return
+            if (e.key === 'ArrowDown') { e.preventDefault(); setDescIdx(i => Math.min(i + 1, suggestions.length - 1)) }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setDescIdx(i => Math.max(i - 1, -1)) }
+            else if (e.key === 'Enter' && descIdx >= 0) { e.preventDefault(); set('description', suggestions[descIdx]); setDescOpen(false); setDescIdx(-1) }
+            else if (e.key === 'Escape') setDescOpen(false)
+          }}
+          autoComplete="off"
           className={`${inputBase} ${errors.description ? inputErr : inputOk}`}
         />
+        {descOpen && suggestions.length > 0 && (
+          <ul className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
+            {suggestions.map((s, i) => (
+              <li
+                key={s}
+                className={`px-3 py-2 text-sm cursor-pointer ${i === descIdx ? 'bg-teal-50 text-teal-700' : 'text-gray-800 hover:bg-gray-50'}`}
+                onMouseDown={() => { set('description', s); setDescOpen(false) }}
+              >
+                {s}
+              </li>
+            ))}
+          </ul>
+        )}
         {errors.description && <p className="mt-1 text-xs text-red-600">{errors.description}</p>}
       </div>
 
@@ -351,7 +411,7 @@ function PaymentForm({ monthKey, onDone, editingPayment, onCancelEdit }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function CreditCard() {
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey())
+  const [selectedMonth, setSelectedMonth] = useSelectedMonth()
   const [purchases, setPurchases] = useState([])
   const [payments, setPayments] = useState([])
   const [priorOutstanding, setPriorOutstanding] = useState(0)

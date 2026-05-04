@@ -43,3 +43,7 @@ export async function updatePayment(id, payload) {
 export async function deletePayment(id) {
   return fetchJson(`/api/credit-card/payments/${id}`, { method: 'DELETE' })
 }
+
+export async function getDescriptions() {
+  return fetchJson('/api/credit-card/descriptions')
+}

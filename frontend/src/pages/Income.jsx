@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Trash2, PlusCircle, DollarSign, TrendingUp, TrendingDown, ChevronDown, Search } from 'lucide-react'
+import { Trash2, PlusCircle, DollarSign, TrendingUp, ChevronDown, Search } from 'lucide-react'
 import { getIncome, updateIncome, createIncome, deleteIncome, copyFromPrev } from '../api/income'
-import { formatCAD, formatDate, formatMonthLabel, currentMonthKey, parseDay } from '../utils/formatters'
+import { formatCAD, formatDate, formatMonthLabel, parseDay } from '../utils/formatters'
+import { useSelectedMonth } from '../utils/useSelectedMonth'
 import ConfirmModal from '../components/ConfirmModal'
 
 const AMOUNT_RE = /^\d+(\.\d{1,2})?$/
@@ -13,7 +14,7 @@ function prevMonthKey(monthKey) {
 }
 
 export default function Income() {
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey())
+  const [selectedMonth, setSelectedMonth] = useSelectedMonth()
   const [rows, setRows] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
@@ -77,8 +78,6 @@ export default function Income() {
 
   // Derived totals
   const totalActual = rows.reduce((sum, r) => sum + (r.actual ?? 0), 0)
-  const totalExpected = rows.reduce((sum, r) => sum + (r.expected ?? 0), 0)
-  const actualColor = totalActual >= totalExpected ? 'text-green-600' : 'text-amber-500'
 
   // Filtered prev rows for import
   const filteredPrev = useMemo(() => {
@@ -236,27 +235,15 @@ export default function Income() {
         </div>
       )}
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <div className="bg-white border border-gray-100 shadow-sm rounded-lg p-5 flex items-center gap-4">
+      {/* Summary card */}
+      <div className="mb-6">
+        <div className="inline-flex bg-white border border-gray-100 shadow-sm rounded-lg p-5 items-center gap-4">
           <div className="p-3 rounded-full bg-teal-100">
             <TrendingUp className="w-5 h-5 text-teal-600" />
           </div>
           <div>
-            <p className="text-sm text-gray-500">Total Expected</p>
-            <p className="text-xl font-semibold text-gray-900">{formatCAD(totalExpected)}</p>
-          </div>
-        </div>
-        <div className="bg-white border border-gray-100 shadow-sm rounded-lg p-5 flex items-center gap-4">
-          <div className={`p-3 rounded-full ${totalActual >= totalExpected ? 'bg-green-100' : 'bg-amber-100'}`}>
-            {totalActual >= totalExpected
-              ? <TrendingUp className="w-5 h-5 text-green-600" />
-              : <TrendingDown className="w-5 h-5 text-amber-500" />
-            }
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Total Actual</p>
-            <p className={`text-xl font-semibold ${actualColor}`}>{formatCAD(totalActual)}</p>
+            <p className="text-sm text-gray-500">Total Income</p>
+            <p className="text-xl font-semibold text-teal-700">{formatCAD(totalActual)}</p>
           </div>
         </div>
       </div>

@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Copy, Trash2, PlusCircle, Home, ChevronDown, ChevronUp } from 'lucide-react'
 import EmptyState from '../components/EmptyState'
 import ConfirmModal from '../components/ConfirmModal'
-import { getHomeExpenses, createHomeExpense, deleteHomeExpense, copyFromPrev } from '../api/homeExpenses'
-import { formatCAD, formatDate, formatMonthLabel, currentMonthKey, parseDay } from '../utils/formatters'
+import { getHomeExpenses, createHomeExpense, updateHomeExpense, deleteHomeExpense, copyFromPrev } from '../api/homeExpenses'
+import { formatCAD, formatDate, formatMonthLabel, parseDay } from '../utils/formatters'
+import { useSelectedMonth } from '../utils/useSelectedMonth'
 
 // ── Delete-policy helper ──────────────────────────────────────────────────────
 
@@ -24,10 +25,166 @@ function blankForm() {
   return { day: String(new Date().getDate()), recipient: '', amount_cad: '', notes: '' }
 }
 
+// ── Inline-editable row ───────────────────────────────────────────────────────
+
+function HomeExpenseRow({ entry, selectedMonth, recipients, cutoff, onSaved, onDelete, onCopy }) {
+  const [editing, setEditing] = useState(null) // 'day' | 'recipient' | 'amount_cad' | 'notes'
+  const [vals, setVals] = useState({
+    day: entry.date ? String(new Date(entry.date + 'T00:00:00').getDate()) : '',
+    recipient: entry.recipient,
+    amount_cad: String(entry.amount_cad),
+    notes: entry.notes ?? '',
+  })
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    setVals({
+      day: entry.date ? String(new Date(entry.date + 'T00:00:00').getDate()) : '',
+      recipient: entry.recipient,
+      amount_cad: String(entry.amount_cad),
+      notes: entry.notes ?? '',
+    })
+    setDirty(false)
+    setSaveError('')
+  }, [entry])
+
+  function change(field, value) {
+    setVals(v => ({ ...v, [field]: value }))
+    setDirty(true)
+  }
+
+  async function handleSave() {
+    const dateIso = vals.day ? parseDay(vals.day, selectedMonth) : null
+    const amountNum = parseFloat(vals.amount_cad)
+    if (!vals.recipient || isNaN(amountNum) || amountNum <= 0) { setSaveError('Invalid fields'); return }
+
+    setSaving(true)
+    setSaveError('')
+    try {
+      await updateHomeExpense(entry.id, {
+        date: dateIso || entry.date,
+        recipient: vals.recipient,
+        amount_cad: amountNum,
+        notes: vals.notes.trim() || null,
+      })
+      setSaved(true)
+      setDirty(false)
+      setTimeout(() => setSaved(false), 2000)
+      onSaved()
+    } catch (err) {
+      setSaveError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter') { setEditing(null); handleSave() }
+    if (e.key === 'Escape') setEditing(null)
+  }
+
+  const canDelete = entry.month_key >= cutoff
+  const inp = 'border border-teal-400 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-teal-300'
+  const display = 'cursor-pointer hover:bg-gray-100 rounded px-1 py-0.5 inline-block'
+
+  return (
+    <tr className="hover:bg-gray-50 border-b border-gray-50">
+      {/* Date */}
+      <td className="px-6 py-3 text-gray-700 whitespace-nowrap">
+        {editing === 'day'
+          ? <input type="number" min="1" max="31" autoFocus className={`${inp} w-16`}
+              value={vals.day} onChange={e => change('day', e.target.value)}
+              onBlur={() => setEditing(null)} onKeyDown={handleKeyDown} />
+          : <span className={display} onClick={() => setEditing('day')} title="Click to edit">
+              {vals.day
+                ? (() => { const iso = parseDay(vals.day, selectedMonth); return iso ? formatDate(iso) : formatDate(entry.date) })()
+                : '—'}
+            </span>
+        }
+      </td>
+      {/* Recipient */}
+      <td className="px-6 py-3 font-medium text-gray-900">
+        {editing === 'recipient'
+          ? recipients.length > 0
+            ? <select autoFocus className={inp} value={vals.recipient}
+                onChange={e => change('recipient', e.target.value)}
+                onBlur={() => setEditing(null)} onKeyDown={handleKeyDown}>
+                {recipients.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            : <input type="text" autoFocus className={`${inp} w-32`} value={vals.recipient}
+                onChange={e => change('recipient', e.target.value)}
+                onBlur={() => setEditing(null)} onKeyDown={handleKeyDown} />
+          : <span className={display} onClick={() => setEditing('recipient')} title="Click to edit">
+              {vals.recipient}
+            </span>
+        }
+      </td>
+      {/* Amount CAD */}
+      <td className="px-6 py-3 text-right">
+        {editing === 'amount_cad'
+          ? <input type="text" autoFocus className={`${inp} w-24 text-right`} value={vals.amount_cad}
+              onChange={e => change('amount_cad', e.target.value)}
+              onBlur={() => setEditing(null)} onKeyDown={handleKeyDown} />
+          : <span className={`${display} font-semibold text-teal-700`} onClick={() => setEditing('amount_cad')} title="Click to edit">
+              {formatCAD(parseFloat(vals.amount_cad) || 0)}
+            </span>
+        }
+      </td>
+      {/* Amount INR — read-only historical */}
+      <td className="whitespace-nowrap px-6 py-3 text-right text-gray-600">
+        {entry.amount_inr != null
+          ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 }).format(entry.amount_inr)
+          : '—'}
+      </td>
+      {/* Notes */}
+      <td className="px-6 py-3 max-w-xs">
+        {editing === 'notes'
+          ? <input type="text" autoFocus className={`${inp} w-full`} value={vals.notes}
+              onChange={e => change('notes', e.target.value)}
+              onBlur={() => setEditing(null)} onKeyDown={handleKeyDown} />
+          : <span className={`${display} text-gray-500 min-w-[60px]`} onClick={() => setEditing('notes')} title="Click to edit">
+              {vals.notes || <span className="italic text-gray-300">Add note…</span>}
+            </span>
+        }
+      </td>
+      {/* Actions */}
+      <td className="px-6 py-3 text-center whitespace-nowrap">
+        {saveError && <span className="text-xs text-red-500 mr-1">{saveError}</span>}
+        {!saveError && saved && !dirty && (
+          <span className="text-xs text-green-600 font-medium mr-2">Saved</span>
+        )}
+        {dirty && (
+          <button onClick={handleSave} disabled={saving}
+            className="text-xs px-2 py-1 bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50 mr-2 transition-colors">
+            {saving ? '…' : 'Save'}
+          </button>
+        )}
+        <button type="button" title="Copy to form" onClick={() => onCopy(entry)}
+          className="inline-flex items-center justify-center rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-teal-600">
+          <Copy size={14} />
+        </button>
+        {canDelete
+          ? <button type="button" title="Delete" onClick={() => onDelete(entry.id)}
+              className="inline-flex items-center justify-center rounded p-1 text-gray-300 hover:bg-red-50 hover:text-red-500">
+              <Trash2 size={14} />
+            </button>
+          : <button type="button" title="Cannot delete records older than 3 months" disabled
+              className="inline-flex cursor-not-allowed items-center justify-center rounded p-1 text-gray-200">
+              <Trash2 size={14} />
+            </button>
+        }
+      </td>
+    </tr>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function HomeExpenses() {
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey())
+  const [selectedMonth, setSelectedMonth] = useSelectedMonth()
   const [entries, setEntries] = useState([])
   const [recipients, setRecipients] = useState([])
   const [loading, setLoading] = useState(true)
@@ -519,68 +676,22 @@ export default function HomeExpenses() {
                   <th className="px-6 py-3 text-right">Amount (CAD)</th>
                   <th className="px-6 py-3 text-right">Amount (INR)</th>
                   <th className="px-6 py-3">Notes</th>
-                  <th className="px-6 py-3 text-center">Copy</th>
-                  <th className="px-6 py-3 text-center">Delete</th>
+                  <th className="px-6 py-3 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {entries.map(entry => {
-                  const canDelete = entry.month_key >= cutoff
-                  return (
-                    <tr key={entry.id} className="hover:bg-gray-50">
-                      <td className="whitespace-nowrap px-6 py-3 text-gray-700">
-                        {formatDate(entry.date)}
-                      </td>
-                      <td className="px-6 py-3 font-medium text-gray-900">{entry.recipient}</td>
-                      <td className="whitespace-nowrap px-6 py-3 text-right font-semibold text-teal-700">
-                        {formatCAD(entry.amount_cad)}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-3 text-right text-gray-600">
-                        {entry.amount_inr != null
-                          ? new Intl.NumberFormat('en-IN', {
-                              style: 'currency',
-                              currency: 'INR',
-                              minimumFractionDigits: 2,
-                            }).format(entry.amount_inr)
-                          : '—'}
-                      </td>
-                      <td className="max-w-xs px-6 py-3 text-gray-500">
-                        {entry.notes ?? '—'}
-                      </td>
-                      <td className="px-6 py-3 text-center">
-                        <button
-                          type="button"
-                          title="Copy to form"
-                          onClick={() => handleCopy(entry)}
-                          className="inline-flex items-center justify-center rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-teal-600"
-                        >
-                          <Copy size={14} />
-                        </button>
-                      </td>
-                      <td className="px-6 py-3 text-center">
-                        {canDelete ? (
-                          <button
-                            type="button"
-                            title="Delete entry"
-                            onClick={() => setConfirmDelete(entry.id)}
-                            className="inline-flex items-center justify-center rounded p-1 text-gray-300 hover:bg-red-50 hover:text-red-500"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            title="Cannot delete records older than 3 months"
-                            disabled
-                            className="inline-flex cursor-not-allowed items-center justify-center rounded p-1 text-gray-200"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
+                {entries.map(entry => (
+                  <HomeExpenseRow
+                    key={entry.id}
+                    entry={entry}
+                    selectedMonth={selectedMonth}
+                    recipients={recipients}
+                    cutoff={cutoff}
+                    onSaved={loadEntries}
+                    onDelete={id => setConfirmDelete(id)}
+                    onCopy={handleCopy}
+                  />
+                ))}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-gray-200 bg-gray-50">
@@ -590,7 +701,7 @@ export default function HomeExpenses() {
                   <td className="px-6 py-3 text-right font-bold text-teal-700">
                     {formatCAD(totalCAD)}
                   </td>
-                  <td colSpan={4} />
+                  <td colSpan={3} />
                 </tr>
               </tfoot>
             </table>

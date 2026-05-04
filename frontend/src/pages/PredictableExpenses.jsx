@@ -3,7 +3,8 @@ import { CalendarDays, CheckCircle, PlusCircle, Trash2, ChevronDown, Search } fr
 import EmptyState from '../components/EmptyState'
 import ConfirmModal from '../components/ConfirmModal'
 import { getPredictable, updatePredictable, createPredictable, deletePredictable, copyFromPrev } from '../api/predictable'
-import { formatCAD, formatDate, formatMonthLabel, currentMonthKey, parseDay } from '../utils/formatters'
+import { formatCAD, formatDate, formatMonthLabel, parseDay } from '../utils/formatters'
+import { useSelectedMonth } from '../utils/useSelectedMonth'
 
 const AMOUNT_RE = /^\d+(\.\d{1,2})?$/
 
@@ -119,7 +120,13 @@ function DayCell({ value, monthKey, onChange, onKeyDown }) {
           onFocus={() => setEditing(true)}
           title="Click to edit"
         >
-          {value ? formatDate(value) : <span className="italic text-gray-300">—</span>}
+          {value
+            ? (() => {
+                const iso = value.includes('-') ? value : parseDay(value, monthKey)
+                return iso ? formatDate(iso) : value
+              })()
+            : <span className="italic text-gray-300">—</span>
+          }
         </span>
       )}
     </td>
@@ -223,7 +230,7 @@ function PredictableRow({ row, selectedMonth, onSaved, onDelete }) {
 
 // ── Main page component ───────────────────────────────────────────────────────
 export default function PredictableExpenses() {
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey())
+  const [selectedMonth, setSelectedMonth] = useSelectedMonth()
   const [rows, setRows] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
@@ -471,7 +478,6 @@ export default function PredictableExpenses() {
                       <span className="flex-1 text-sm text-gray-800 font-medium">{row.category}</span>
                       {row.date && <span className="text-xs text-gray-400">{formatDate(row.date)}</span>}
                       <span className="text-sm text-gray-700 w-20 text-right">{formatCAD(row.actual ?? 0)}</span>
-                      {row.notes && <span className="text-xs text-gray-400 max-w-[120px] truncate">{row.notes}</span>}
                     </label>
                   ))}
                 </div>

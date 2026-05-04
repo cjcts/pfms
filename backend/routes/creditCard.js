@@ -39,6 +39,22 @@ router.get('/', (req, res) => {
   }
 })
 
+// GET /api/credit-card/descriptions — unique descriptions ordered by frequency
+router.get('/descriptions', (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT description, COUNT(*) AS freq
+      FROM credit_card_purchases
+      GROUP BY description
+      ORDER BY freq DESC, description ASC
+      LIMIT 100
+    `).all()
+    res.json({ success: true, data: rows.map(r => r.description) })
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
 // POST /api/credit-card/purchases
 router.post('/purchases', (req, res) => {
   try {
