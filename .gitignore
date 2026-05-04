@@ -1,0 +1,18 @@
+**/node_modules/
+dist/
+
+# SQLite databases
+backend/finance.db
+backend/finance.db-shm
+backend/finance.db-wal
+test.db
+test.db-wal
+test.db-shm
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# Claude Code local config
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
